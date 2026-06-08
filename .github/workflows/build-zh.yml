@@ -1,0 +1,65 @@
+name: Build Tailscale Android (Chinese)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        run: |
+          sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "ndk;23.1.7779620" "platform-tools" "extras;android;m2repository"
+
+      - name: Install gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          gomobile init
+
+      - name: Build libtailscale.aar
+        run: |
+          export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/23.1.7779620
+          export PATH=$PATH:$(go env GOPATH)/bin
+          # Get version info
+          VERSION=$(git describe --tags --always 2>/dev/null || echo "1.86.2-tcustom")
+          echo "Building version: $VERSION"
+          # Build the Go library for Android
+          mkdir -p android/libs
+          gomobile bind -target=android -androidapi=26 \
+            -ldflags="-X tailscale.com/version.longStamp=$VERSION" \
+            -tags ts_omit_cachenetmap \
+            -o android/libs/libtailscale.aar \
+            tailscale.com/cmd/libtailscale
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: tailscale-android-zh
+          path: android/build/outputs/apk/debug/*.apk
